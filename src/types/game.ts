@@ -127,6 +127,8 @@ export interface GameState {
   activeMainCard: MainCard | null;
   drawnDice: DiceCard[];
   usedDiceIds: string[];
+  mainDrawnThisTurn: boolean;
+  diceDrawnThisTurn: boolean;
   timeBombResolvedThisTurn: boolean;
   equivalentExchangeUsed: boolean;
   equivalentExchangeBonus: number;

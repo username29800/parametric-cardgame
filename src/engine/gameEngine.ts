@@ -5,6 +5,7 @@ import {
   STARTER_PARAMETERS,
 } from '../data/cards.ts';
 import { clampDifficulty } from './difficulty.ts';
+import { getBankruptcyLimit, getPlayerConditions } from './conditions.ts';
 import type {
   DiceCard,
   GameState,
@@ -60,6 +61,8 @@ export function createInitialGameState(
     activeMainCard: null,
     drawnDice: [],
     usedDiceIds: [],
+    mainDrawnThisTurn: false,
+    diceDrawnThisTurn: false,
     timeBombResolvedThisTurn: false,
     equivalentExchangeUsed: false,
     equivalentExchangeBonus: 0,
@@ -200,49 +203,100 @@ export function getEffectiveDieValue(state: GameState, rawValue: number, forceSa
   return rawValue;
 }
 
-export function drawTurnCards(state: GameState): GameState {
-  if (state.phase !== 'ready_to_draw') return state;
+export type DrawSource = 'main' | 'dice';
+
+/** 이번 턴에 해당 스택에서 드로우할 수 있는 수량 (룰 카드 반영). */
+export function getDrawCount(state: GameState, source: DrawSource): number {
+  if (source === 'main') return hasEffectiveRule(state, 'overclock') ? 2 : 1;
+  return hasEffectiveRule(state, 'loaded_hand') ? 3 : 2;
+}
+
+/**
+ * 플레이어가 지정한 스택에서 지금 드로우할 수 있는지 판정한다.
+ * 기본 규칙(모드 카드): 자신의 턴에만, 스택마다 턴당 1회 드로우.
+ * 드로우 예외를 정의하는 룰 카드가 추가되면 이 함수에서 처리한다.
+ */
+export function canPlayerDraw(state: GameState, playerId: PlayerId, source: DrawSource): boolean {
+  if (state.phase !== 'ready_to_draw') return false;
+  if (state.activePlayer !== playerId) return false;
+  return source === 'main' ? !state.mainDrawnThisTurn : !state.diceDrawnThisTurn;
+}
+
+/**
+ * 한 스택에서 카드를 드로우한다. 메인 스택과 주사위 스택을 모두 드로우하면
+ * 뽑은 카드를 해결 단계로 넘긴다 (룰 카드 배치, 과부하 선택, 파라미터 해결).
+ */
+export function drawFromStack(
+  state: GameState,
+  source: DrawSource,
+  playerId: PlayerId = state.activePlayer
+): GameState {
+  if (!canPlayerDraw(state, playerId, source)) return state;
 
   const actor = state.players[state.activePlayer];
-  const mainCount = hasEffectiveRule(state, 'overclock') ? 2 : 1;
-  const diceCount = hasEffectiveRule(state, 'loaded_hand') ? 3 : 2;
+  const count = getDrawCount(state, source);
+  let next: GameState;
 
-  const mainRes = drawFromMainStack(state, mainCount);
-  const diceRes = drawFromDiceStack(mainRes.state, diceCount);
-
-  let next = diceRes.state;
-  next = {
-    ...next,
-    drawnMainCards: mainRes.cards,
-    drawnDice: diceRes.dice,
-    usedDiceIds: [],
-    timeBombResolvedThisTurn: false,
-    equivalentExchangeUsed: false,
-    equivalentExchangeBonus: 0,
-    signFlipActiveThisTurn: false,
-  };
-
-  const diceStr = diceRes.dice.map((d) => `[${d.value}]`).join(' ');
-  next = appendLog(next, actor.name, `주사위 ${diceCount}장 드로우: ${diceStr}`, 'info');
-
-  if (mainRes.cards.length === 0) {
-    return { ...next, phase: 'turn_end_ready' };
-  }
-
-  if (mainRes.cards.length > 1) {
+  if (source === 'main') {
+    const res = drawFromMainStack(state, count);
+    next = { ...res.state, drawnMainCards: res.cards, mainDrawnThisTurn: true };
     next = appendLog(
       next,
       actor.name,
-      `[과부하] 효과로 메인 카드 2장을 뽑았습니다. 1장을 선택하세요.`,
-      'rule'
+      res.cards.length === 0
+        ? '메인 스택과 세컨더리 스택이 모두 비어 카드를 뽑지 못했습니다.'
+        : `메인 스택에서 ${res.cards.length}장 드로우`,
+      'info'
     );
-    return {
-      ...next,
-      phase: 'choose_overclock_card',
-    };
+  } else {
+    const res = drawFromDiceStack(state, count);
+    next = { ...res.state, drawnDice: res.dice, diceDrawnThisTurn: true };
+    const diceStr = res.dice.map((d) => `[${d.value}]`).join(' ');
+    next = appendLog(next, actor.name, `주사위 ${res.dice.length}장 드로우: ${diceStr}`, 'info');
   }
 
-  return activateMainCard(next, mainRes.cards[0]);
+  if (!next.mainDrawnThisTurn || !next.diceDrawnThisTurn) return next;
+  return resolveDrawnCards(next);
+}
+
+function resolveDrawnCards(state: GameState): GameState {
+  const actor = state.players[state.activePlayer];
+
+  if (state.drawnMainCards.length === 0) {
+    return { ...state, phase: 'turn_end_ready' };
+  }
+
+  if (state.drawnMainCards.length > 1) {
+    const next = appendLog(
+      state,
+      actor.name,
+      `[과부하] 효과로 메인 카드 ${state.drawnMainCards.length}장을 뽑았습니다. 1장을 선택하세요.`,
+      'rule'
+    );
+    return { ...next, phase: 'choose_overclock_card' };
+  }
+
+  return activateMainCard(state, state.drawnMainCards[0]);
+}
+
+/** 메인 스택과 주사위 스택을 한 번에 드로우한다 (AI 및 테스트용). */
+export function drawTurnCards(state: GameState): GameState {
+  if (state.phase !== 'ready_to_draw') return state;
+  return drawFromStack(drawFromStack(state, 'main'), 'dice');
+}
+
+/** 스택이 바닥났으면 세컨더리 스택을 섞어 스택 자리로 되돌린다. */
+export function refillEmptyStacks(state: GameState): GameState {
+  let next = state;
+  if (next.mainStack.length === 0 && next.mainSecondaryStack.length > 0) {
+    next = { ...next, mainStack: shuffle(next.mainSecondaryStack), mainSecondaryStack: [] };
+    next = appendLog(next, '시스템', '메인 스택이 바닥나 세컨더리 스택을 섞어 되돌렸습니다.', 'info');
+  }
+  if (next.diceStack.length === 0 && next.diceSecondaryStack.length > 0) {
+    next = { ...next, diceStack: shuffle(next.diceSecondaryStack), diceSecondaryStack: [] };
+    next = appendLog(next, '시스템', '주사위 스택이 바닥나 세컨더리 스택을 섞어 되돌렸습니다.', 'info');
+  }
+  return next;
 }
 
 export function chooseOverclockCard(state: GameState, cardId: string): GameState {
@@ -715,6 +769,26 @@ export function dismissDebtRepayment(state: GameState, dieId: string): GameState
   return next;
 }
 
+export function getEffectiveParamSign(state: GameState, card: ParameterCard): '+' | '-' {
+  if (state.signFlipActiveThisTurn && hasEffectiveRule(state, 'sign_flip')) {
+    return card.sign === '+' ? '-' : '+';
+  }
+  return card.sign;
+}
+
+/** 주사위 기본값에 부호 반전·등가교환·유리대포·증폭기를 반영한 최종 증감량. */
+export function computeParameterDelta(state: GameState, card: ParameterCard, baseValue: number): number {
+  const effectiveSign = getEffectiveParamSign(state, card);
+  let magnitude = baseValue + state.equivalentExchangeBonus;
+  if (effectiveSign === '+') {
+    if (hasEffectiveRule(state, 'glass_cannon')) magnitude += 2;
+    if (hasEffectiveRule(state, 'amplifier')) magnitude += 2;
+  } else if (hasEffectiveRule(state, 'amplifier')) {
+    magnitude += 1;
+  }
+  return effectiveSign === '+' ? magnitude : -magnitude;
+}
+
 export function applyDieToParameter(
   state: GameState,
   dieIds: string[],
@@ -761,20 +835,7 @@ export function applyDieToParameter(
   }
 
   const card: ParameterCard = state.activeMainCard;
-  let effectiveSign: '+' | '-' = card.sign;
-  if (state.signFlipActiveThisTurn && hasEffectiveRule(state, 'sign_flip')) {
-    effectiveSign = card.sign === '+' ? '-' : '+';
-  }
-
-  let magnitude = baseValue + state.equivalentExchangeBonus;
-  if (effectiveSign === '+') {
-    if (hasEffectiveRule(state, 'glass_cannon')) magnitude += 2;
-    if (hasEffectiveRule(state, 'amplifier')) magnitude += 2;
-  } else {
-    if (hasEffectiveRule(state, 'amplifier')) magnitude += 1;
-  }
-
-  const delta = effectiveSign === '+' ? magnitude : -magnitude;
+  const delta = computeParameterDelta(state, card, baseValue);
   const paramOwnerId = getEffectiveParamOwner(state);
   const paramOwner = state.players[paramOwnerId];
   const prevVal = paramOwner.parameters[card.paramName] ?? 0;
@@ -832,8 +893,7 @@ function evaluatePlayerEndState(
   const rules = player.rules;
   const hasRule = (id: RuleId) => rules.some((r) => r.ruleId === id);
 
-  const ironOffset = hasRule('iron_will') ? 3 : 0;
-  const bankruptcyLimit = hasRule('glass_cannon') ? -8 : hasRule('iron_will') ? -18 : -12;
+  const bankruptcyLimit = getBankruptcyLimit(rules);
 
   // Check Scapegoat before bankruptcy
   if (!hasRule('abyssal_pact') && hasRule('scapegoat')) {
@@ -866,86 +926,15 @@ function evaluatePlayerEndState(
   }
 
   const currentParams = next.players[playerId].parameters;
-  const values = Object.values(currentParams);
-  const sum = values.reduce((a, b) => a + b, 0);
+  const conditions = getPlayerConditions(next.players[playerId].rules, currentParams, player.name);
 
-  // Check Abyssal Pact win
-  if (hasRule('abyssal_pact')) {
-    const abyssHit = Object.entries(currentParams).find(([, v]) => v <= -10);
-    if (abyssHit) {
-      return {
-        result: 'win',
-        reason: `[나락의 끝] 달성! '${abyssHit[0]}'이(가) ${abyssHit[1]}에 도달했습니다.`,
-        updatedState: next,
-      };
-    }
-  } else {
-    // Check Bankruptcy Loss
-    const bankruptHit = Object.entries(currentParams).find(([, v]) => v <= bankruptcyLimit);
-    if (bankruptHit) {
-      return {
-        result: 'loss',
-        reason: `${player.name} 파산! '${bankruptHit[0]}'이(가) ${bankruptHit[1]} (${bankruptcyLimit} 이하)에 도달했습니다.`,
-        updatedState: next,
-      };
-    }
+  if (conditions.loss?.met) {
+    return { result: 'loss', reason: conditions.loss.reason, updatedState: next };
   }
 
-  // Check Win Conditions
-  if (hasRule('hyperfocus')) {
-    const target = 12 + ironOffset;
-    const hit = Object.entries(currentParams).find(([, v]) => v >= target);
-    if (hit) {
-      return {
-        result: 'win',
-        reason: `[초집중] 승리! '${hit[0]}'이(가) +${hit[1]} (+${target} 이상)에 도달했습니다.`,
-        updatedState: next,
-      };
-    }
-    return { result: 'none', reason: null, updatedState: next };
-  }
-
-  if (hasRule('equilibrium')) {
-    const target = 5 + ironOffset;
-    const count = values.filter((v) => v >= target).length;
-    if (count >= 4) {
-      return {
-        result: 'win',
-        reason: `[균형주의자] 승리! ${count}개 파라미터가 +${target} 이상에 도달했습니다.`,
-        updatedState: next,
-      };
-    }
-    return { result: 'none', reason: null, updatedState: next };
-  }
-
-  // Standard Win Conditions
-  const singleTarget = 15 + ironOffset;
-  const singleHit = Object.entries(currentParams).find(([, v]) => v >= singleTarget);
-  if (singleHit && !hasRule('abyssal_pact')) {
-    return {
-      result: 'win',
-      reason: `단일 파라미터 승리! '${singleHit[0]}'이(가) +${singleHit[1]} (+${singleTarget} 이상)에 도달했습니다.`,
-      updatedState: next,
-    };
-  }
-
-  const tripleTarget = 8 + ironOffset;
-  const tripleCount = values.filter((v) => v >= tripleTarget).length;
-  if (tripleCount >= 3) {
-    return {
-      result: 'win',
-      reason: `다중 파라미터 승리! ${tripleCount}개 파라미터가 +${tripleTarget} 이상에 도달했습니다.`,
-      updatedState: next,
-    };
-  }
-
-  const sumTarget = 25 + ironOffset;
-  if (sum >= sumTarget) {
-    return {
-      result: 'win',
-      reason: `총합 승리! 모든 파라미터 총합이 +${sum} (+${sumTarget} 이상)에 도달했습니다.`,
-      updatedState: next,
-    };
+  const won = conditions.wins.find((w) => w.met);
+  if (won) {
+    return { result: 'win', reason: won.reason, updatedState: next };
   }
 
   return { result: 'none', reason: null, updatedState: next };
@@ -964,6 +953,8 @@ export function endTurn(state: GameState): GameState {
     activeMainCard: null,
     drawnDice: [],
     usedDiceIds: [],
+    mainDrawnThisTurn: false,
+    diceDrawnThisTurn: false,
     combination: null,
     timeBombResolvedThisTurn: false,
     equivalentExchangeUsed: false,
@@ -1025,12 +1016,12 @@ export function endTurn(state: GameState): GameState {
     return { ...next, phase: 'game_over', winner: activeId, winReason: oppEval.reason };
   }
 
-  return {
+  return refillEmptyStacks({
     ...next,
     activePlayer: oppId,
     turnNumber: oppId === 'p1' ? next.turnNumber + 1 : next.turnNumber,
     phase: 'ready_to_draw',
-  };
+  });
 }
 
 /**
