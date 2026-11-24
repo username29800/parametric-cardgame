@@ -501,23 +501,21 @@ export function PlayerZone({
     <RuleDeck game={game} playerId={playerId} humanActing={humanActing} handlers={handlers} size={size} />
   );
 
+  // 아래쪽 플레이어: 파라미터 덱 → 룰 덱 → 상태 디스플레이(테이블 맨 아래)
+  // 위쪽 플레이어는 거울 배치: 상태 디스플레이(테이블 맨 위) → 룰 덱 → 파라미터 덱
   return (
     <div className={`player-zone zone-${position} ${game.activePlayer === playerId ? 'is-turn' : ''}`}>
       {position === 'top' ? (
         <>
+          {status}
           {ruleDeck}
-          <div className="zone-mid">
-            {status}
-            {paramDeck}
-          </div>
+          {paramDeck}
         </>
       ) : (
         <>
-          <div className="zone-mid">
-            {status}
-            {paramDeck}
-          </div>
+          {paramDeck}
           {ruleDeck}
+          {status}
         </>
       )}
     </div>
