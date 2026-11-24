@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { getDifficultyProfile } from './engine/difficulty.ts';
 import {
   activateEquivalentExchange,
   applyDieToParameter,
   applyDieToTimeBomb,
   chooseOverclockCard,
   createInitialGameState,
+  dismissDebtRepayment,
   drawTurnCards,
   endTurn,
   getEffectiveDieValue,
@@ -150,8 +152,150 @@ function ModCardModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function DifficultyModal({
+  initialMode,
+  initialDifficulty,
+  canCancel,
+  onCancel,
+  onStart,
+}: {
+  initialMode: 'vs_ai' | 'local_2p';
+  initialDifficulty: number;
+  canCancel: boolean;
+  onCancel: () => void;
+  onStart: (mode: 'vs_ai' | 'local_2p', difficulty: number) => void;
+}) {
+  const [mode, setMode] = useState<'vs_ai' | 'local_2p'>(initialMode);
+  const [difficulty, setDifficulty] = useState<number>(initialDifficulty);
+  const profile = getDifficultyProfile(difficulty);
+
+  const presets = [
+    { label: '1.0 입문', value: 1.0 },
+    { label: '3.5 표준', value: 3.5 },
+    { label: '5.0 변동', value: 5.0 },
+    { label: '7.5 압박', value: 7.5 },
+    { label: '10.0 나락', value: 10.0 },
+  ];
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="diff-header">
+          <div>
+            <h2>🎛️ 대전 설정 및 난이도 선택</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
+              난이도(0.1 ~ 10.0)에 따라 카드와 주사위의 확률 분포가 비선형적으로 변화합니다.
+            </p>
+          </div>
+          <div className="diff-value-badge">{profile.difficulty.toFixed(1)}</div>
+        </div>
+
+        <div className="diff-presets">
+          <button
+            className={mode === 'vs_ai' ? 'active' : ''}
+            onClick={() => setMode('vs_ai')}
+          >
+            🤖 1인 vs AI
+          </button>
+          <button
+            className={mode === 'local_2p' ? 'active' : ''}
+            onClick={() => setMode('local_2p')}
+          >
+            👥 로컬 2인 대전
+          </button>
+        </div>
+
+        <div className="diff-slider-wrap">
+          <input
+            type="range"
+            className="diff-slider"
+            min="0.1"
+            max="10.0"
+            step="0.1"
+            value={difficulty}
+            onChange={(e) => setDifficulty(parseFloat(e.target.value))}
+          />
+          <div className="diff-presets">
+            {presets.map((p) => (
+              <button
+                key={p.value}
+                className={Math.abs(profile.difficulty - p.value) < 0.05 ? 'active' : ''}
+                onClick={() => setDifficulty(p.value)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`phase-banner ${profile.phase}`}>
+          <div style={{ fontWeight: 700, marginBottom: '2px' }}>{profile.phaseLabel}</div>
+          <div style={{ color: 'var(--muted)', fontSize: '0.78rem' }}>
+            {profile.phaseDescription}
+          </div>
+        </div>
+
+        <div className="telemetry-grid">
+          <div className="telemetry-card">
+            <div className="telemetry-label">파라미터 부호 비율 (+ : -)</div>
+            <div className="telemetry-val">
+              +{Math.round(profile.paramPlusProb * 100)}% : -
+              {Math.round(profile.paramMinusProb * 100)}%
+            </div>
+            <div className="ratio-bar">
+              <div
+                style={{
+                  width: `${profile.paramPlusProb * 100}%`,
+                  background: 'var(--emerald)',
+                }}
+              />
+              <div
+                style={{
+                  width: `${profile.paramMinusProb * 100}%`,
+                  background: 'var(--rose)',
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="telemetry-card">
+            <div className="telemetry-label">주사위 기댓값 / 고눈(5~6) 확률</div>
+            <div className="telemetry-val">
+              평균 {profile.diceExpectedValue.toFixed(2)} · 고눈{' '}
+              {Math.round(profile.diceHighProb * 100)}%
+            </div>
+          </div>
+
+          <div className="telemetry-card">
+            <div className="telemetry-label">룰 카드 비중 (40장 중)</div>
+            <div className="telemetry-val">
+              {profile.ruleCount}장 ({Math.round((profile.ruleCount / 40) * 100)}%)
+            </div>
+          </div>
+
+          <div className="telemetry-card">
+            <div className="telemetry-label">불리한 압박형 룰 비율</div>
+            <div className="telemetry-val" style={{ color: 'var(--rose)' }}>
+              {Math.round(profile.hazardShare * 100)}%
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+          {canCancel && <button onClick={onCancel}>취소</button>}
+          <button className="primary" onClick={() => onStart(mode, profile.difficulty)}>
+            🚀 이 난이도로 대전 시작
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const [game, setGame] = useState<GameState>(() => createInitialGameState('vs_ai'));
+  const [game, setGame] = useState<GameState>(() => createInitialGameState('vs_ai', 3.5));
+  const [showDifficultyModal, setShowDifficultyModal] = useState(true);
+  const [hasStartedOnce, setHasStartedOnce] = useState(false);
   const [showModModal, setShowModModal] = useState(false);
   const [showExchangePicker, setShowExchangePicker] = useState(false);
 
@@ -166,9 +310,11 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [game, isAITurn]);
 
-  const startNewGame = (mode: 'vs_ai' | 'local_2p') => {
+  const startNewGame = (mode: 'vs_ai' | 'local_2p', difficulty = game.difficulty) => {
     setShowExchangePicker(false);
-    setGame(createInitialGameState(mode));
+    setShowDifficultyModal(false);
+    setHasStartedOnce(true);
+    setGame(createInitialGameState(mode, difficulty));
   };
 
   const unusedDice = game.drawnDice.filter((d) => !game.usedDiceIds.includes(d.id));
@@ -213,13 +359,14 @@ export default function App() {
           <div className={`turn-pill ${game.activePlayer === 'p1' ? 'active-p1' : 'active-p2'}`}>
             턴 {game.turnNumber} · {activePlayerObj.name}
           </div>
+          <span className="stat-chip">난이도 {game.difficulty.toFixed(1)}</span>
           <button
-            onClick={() => startNewGame(game.mode === 'vs_ai' ? 'local_2p' : 'vs_ai')}
+            onClick={() => startNewGame(game.mode === 'vs_ai' ? 'local_2p' : 'vs_ai', game.difficulty)}
           >
             모드 전환: {game.mode === 'vs_ai' ? '1인 vs AI' : '로컬 2인'}
           </button>
           <button onClick={() => setShowModModal(true)}>📜 모드 카드</button>
-          <button onClick={() => startNewGame(game.mode)}>새 게임</button>
+          <button onClick={() => setShowDifficultyModal(true)}>🎛️ 새 게임 / 난이도</button>
         </div>
       </header>
 
@@ -426,6 +573,21 @@ export default function App() {
                       </button>
                     )}
 
+                    {hasEffectiveRule(game, 'debt_repayment') &&
+                      unusedDice.some((d) => getEffectiveDieValue(game, d.value) >= 6) && (
+                        <button
+                          className="amber"
+                          onClick={() => {
+                            const sixDie = unusedDice.find(
+                              (d) => getEffectiveDieValue(game, d.value) >= 6
+                            );
+                            if (sixDie) setGame((g) => dismissDebtRepayment(g, sixDie.id));
+                          }}
+                        >
+                          💸 [부채 상환] 주사위 6 지불해 해제
+                        </button>
+                      )}
+
                     {twinPair && game.activeMainCard?.kind === 'parameter' && (
                       <button
                         className="amber"
@@ -521,6 +683,15 @@ export default function App() {
       </div>
 
       {showModModal && <ModCardModal onClose={() => setShowModModal(false)} />}
+      {showDifficultyModal && (
+        <DifficultyModal
+          initialMode={game.mode}
+          initialDifficulty={game.difficulty}
+          canCancel={hasStartedOnce}
+          onCancel={() => setShowDifficultyModal(false)}
+          onStart={(m, d) => startNewGame(m, d)}
+        />
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ export type RuleDomain =
 
 export type DiceSensitivity = '없음' | '필수' | '선택';
 
+export type RuleTier = 'beneficial' | 'tactical' | 'hazard';
+
 export interface ParameterCard {
   id: string;
   kind: 'parameter';
@@ -39,7 +41,9 @@ export type RuleId =
   | 'sign_flip'
   | 'equivalent_exchange'
   | 'time_bomb'
-  | 'rule_eater';
+  | 'rule_eater'
+  | 'debt_repayment'
+  | 'rule_lock';
 
 export interface RuleCard {
   id: string;
@@ -49,6 +53,7 @@ export interface RuleCard {
   englishName: string;
   domain: RuleDomain;
   sensitivity: DiceSensitivity;
+  tier: RuleTier;
   isInstant?: boolean;
   counterValue?: number;
   counterLabel?: string;
@@ -60,6 +65,20 @@ export type MainCard = ParameterCard | RuleCard;
 export interface DiceCard {
   id: string;
   value: 1 | 2 | 3 | 4 | 5 | 6;
+}
+
+export interface DifficultyProfile {
+  difficulty: number;
+  phase: 'phase1' | 'phase2';
+  phaseLabel: string;
+  phaseDescription: string;
+  paramPlusProb: number;
+  paramMinusProb: number;
+  diceWeights: [number, number, number, number, number, number];
+  diceExpectedValue: number;
+  diceHighProb: number;
+  ruleCount: number;
+  hazardShare: number;
 }
 
 export interface StateSpaceCombination {
@@ -94,6 +113,7 @@ export interface LogEntry {
 
 export interface GameState {
   mode: 'vs_ai' | 'local_2p';
+  difficulty: number;
   turnNumber: number;
   activePlayer: PlayerId;
   phase: TurnPhase;

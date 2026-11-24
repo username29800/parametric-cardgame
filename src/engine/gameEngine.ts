@@ -4,6 +4,7 @@ import {
   shuffle,
   STARTER_PARAMETERS,
 } from '../data/cards.ts';
+import { clampDifficulty } from './difficulty.ts';
 import type {
   DiceCard,
   GameState,
@@ -23,9 +24,14 @@ function createInitialParameters(): Record<string, number> {
   return params;
 }
 
-export function createInitialGameState(mode: 'vs_ai' | 'local_2p' = 'vs_ai'): GameState {
+export function createInitialGameState(
+  mode: 'vs_ai' | 'local_2p' = 'vs_ai',
+  rawDifficulty = 3.5
+): GameState {
+  const difficulty = clampDifficulty(rawDifficulty);
   return {
     mode,
+    difficulty,
     turnNumber: 1,
     activePlayer: 'p1',
     phase: 'ready_to_draw',
@@ -45,9 +51,9 @@ export function createInitialGameState(mode: 'vs_ai' | 'local_2p' = 'vs_ai'): Ga
         rules: [],
       },
     },
-    mainStack: createStarterMainDeck(),
+    mainStack: createStarterMainDeck(difficulty),
     mainSecondaryStack: [],
-    diceStack: createDiceDeck(),
+    diceStack: createDiceDeck(difficulty),
     diceSecondaryStack: [],
     combination: null,
     drawnMainCards: [],
@@ -66,7 +72,7 @@ export function createInitialGameState(mode: 'vs_ai' | 'local_2p' = 'vs_ai'): Ga
         id: 1,
         turn: 1,
         actor: '시스템',
-        message: '프로젝트 파라메트릭 대전이 시작되었습니다. 모드 카드: 스탠다드 프로토콜 v1.0 적용 중.',
+        message: `프로젝트 파라메트릭 대전이 시작되었습니다. (난이도 ${difficulty.toFixed(1)} · 스탠다드 프로토콜 v1.0)`,
         type: 'info',
       },
     ],
@@ -416,6 +422,30 @@ function placeRuleCard(state: GameState, card: RuleCard): GameState {
     'rule'
   );
 
+  if (hasPlayerRule(next, actorId, 'rule_lock')) {
+    const entries = Object.entries(next.players[actorId].parameters).sort((a, b) => a[1] - b[1]);
+    const lowest = entries[0][0];
+    next = {
+      ...next,
+      players: {
+        ...next.players,
+        [actorId]: {
+          ...next.players[actorId],
+          parameters: {
+            ...next.players[actorId].parameters,
+            [lowest]: next.players[actorId].parameters[lowest] - 2,
+          },
+        },
+      },
+    };
+    next = appendLog(
+      next,
+      actor.name,
+      `🔒 [규칙 잠금] 룰 배치 페널티로 '${lowest}'이(가) -2 감소했습니다.`,
+      'warn'
+    );
+  }
+
   return checkPostRulePhase(next);
 }
 
@@ -647,6 +677,42 @@ export function applyDieToTimeBomb(state: GameState, dieId: string): GameState {
     return { ...next, phase: 'turn_end_ready' };
   }
 
+  return next;
+}
+
+export function dismissDebtRepayment(state: GameState, dieId: string): GameState {
+  if (state.phase !== 'resolve_action') return state;
+  const die = state.drawnDice.find((d) => d.id === dieId && !state.usedDiceIds.includes(d.id));
+  if (!die || getEffectiveDieValue(state, die.value) < 6) return state;
+
+  const ruleOwnerId = getEffectiveRuleOwner(state);
+  const ruleOwner = state.players[ruleOwnerId];
+  const debtCard = ruleOwner.rules.find((r) => r.ruleId === 'debt_repayment');
+  if (!debtCard) return state;
+
+  let next: GameState = {
+    ...state,
+    players: {
+      ...state.players,
+      [ruleOwnerId]: {
+        ...ruleOwner,
+        rules: ruleOwner.rules.filter((r) => r.id !== debtCard.id),
+      },
+    },
+    usedDiceIds: [...state.usedDiceIds, die.id],
+    mainSecondaryStack: [...state.mainSecondaryStack, debtCard],
+  };
+
+  next = appendLog(
+    next,
+    state.players[state.activePlayer].name,
+    `💸 [부채 상환] 주사위 [6]을 지불하여 부채 상환 규칙을 해제했습니다!`,
+    'rule'
+  );
+
+  if (!next.activeMainCard || next.activeMainCard.kind !== 'parameter') {
+    return { ...next, phase: 'turn_end_ready' };
+  }
   return next;
 }
 
@@ -914,6 +980,30 @@ export function endTurn(state: GameState): GameState {
   const activeId = state.activePlayer;
   const oppId = getOpponent(activeId);
 
+  if (hasPlayerRule(next, activeId, 'debt_repayment')) {
+    const entries = Object.entries(next.players[activeId].parameters).sort((a, b) => b[1] - a[1]);
+    const highest = entries[0][0];
+    next = {
+      ...next,
+      players: {
+        ...next.players,
+        [activeId]: {
+          ...next.players[activeId],
+          parameters: {
+            ...next.players[activeId].parameters,
+            [highest]: next.players[activeId].parameters[highest] - 1,
+          },
+        },
+      },
+    };
+    next = appendLog(
+      next,
+      next.players[activeId].name,
+      `💸 [부채 상환] 턴 종료 페널티로 '${highest}'이(가) -1 감소했습니다.`,
+      'warn'
+    );
+  }
+
   const activeEval = evaluatePlayerEndState(next, activeId);
   next = activeEval.updatedState;
   if (activeEval.result === 'win') {
@@ -982,12 +1072,37 @@ export function runAIStep(state: GameState): GameState {
         return applyDieToTimeBomb(state, sortedAsc[0].id);
       }
 
+      if (
+        state.difficulty >= 7.1 &&
+        hasEffectiveRule(state, 'debt_repayment') &&
+        unusedDice.some((d) => getEffectiveDieValue(state, d.value) >= 6)
+      ) {
+        const sixDie = unusedDice.find((d) => getEffectiveDieValue(state, d.value) >= 6)!;
+        return dismissDebtRepayment(state, sixDie.id);
+      }
+
       if (state.activeMainCard?.kind === 'parameter' && unusedDice.length > 0) {
         const card = state.activeMainCard;
         const paramOwner = getEffectiveParamOwner(state);
         const targetingSelf = paramOwner === aiId;
+
+        if (
+          state.difficulty >= 7.1 &&
+          hasEffectiveRule(state, 'sign_flip') &&
+          !state.signFlipActiveThisTurn &&
+          ((targetingSelf && card.sign === '-') || (!targetingSelf && card.sign === '+'))
+        ) {
+          return toggleSignFlip(state);
+        }
+
+        const effectiveSign =
+          state.signFlipActiveThisTurn && hasEffectiveRule(state, 'sign_flip')
+            ? card.sign === '+'
+              ? '-'
+              : '+'
+            : card.sign;
         const wantHigh =
-          (targetingSelf && card.sign === '+') || (!targetingSelf && card.sign === '-');
+          (targetingSelf && effectiveSign === '+') || (!targetingSelf && effectiveSign === '-');
 
         // Check Twin Synergy double
         if (hasEffectiveRule(state, 'twin_synergy') && wantHigh) {
@@ -1003,6 +1118,11 @@ export function runAIStep(state: GameState): GameState {
         const sorted = [...unusedDice].sort(
           (a, b) => getEffectiveDieValue(state, a.value) - getEffectiveDieValue(state, b.value)
         );
+        // Low difficulty AI occasionally picks suboptimal die
+        if (state.difficulty <= 2.5 && sorted.length > 1 && Math.random() < 0.3) {
+          const suboptimal = wantHigh ? sorted[0] : sorted[sorted.length - 1];
+          return applyDieToParameter(state, [suboptimal.id]);
+        }
         const chosenDie = wantHigh ? sorted[sorted.length - 1] : sorted[0];
         return applyDieToParameter(state, [chosenDie.id]);
       }

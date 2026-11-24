@@ -87,3 +87,35 @@ testParameterApplicationAndEndTurn();
 testRuleConflictResolution();
 testVictoryAndBankruptcy();
 console.log('All engine tests passed!');
+
+import { getDifficultyProfile } from '../src/engine/difficulty.ts';
+
+function testDifficultyNonLinearCurves() {
+  const p01 = getDifficultyProfile(0.1);
+  const p35 = getDifficultyProfile(3.5);
+  const p50 = getDifficultyProfile(5.0);
+  const p51 = getDifficultyProfile(5.1);
+  const p10 = getDifficultyProfile(10.0);
+
+  // Phase I: minus probability and dice expected value both rise from 0.1 to 5.0
+  assert.ok(p01.paramMinusProb < p35.paramMinusProb);
+  assert.ok(p35.paramMinusProb < p50.paramMinusProb);
+  assert.ok(p01.diceExpectedValue < p35.diceExpectedValue);
+  assert.ok(p35.diceExpectedValue < p50.diceExpectedValue);
+
+  // Phase II: 5.1 ~ 10.0 reverts paramMinusProb to 3.5 (0.50), while hazardShare increases
+  assert.equal(p51.paramMinusProb, p35.paramMinusProb, '5.1 should match 3.5 param ratio');
+  assert.equal(p10.paramMinusProb, p35.paramMinusProb, '10.0 should match 3.5 param ratio');
+  assert.ok(p51.hazardShare > p50.hazardShare);
+  assert.ok(p10.hazardShare > p51.hazardShare);
+  assert.ok(p10.ruleCount > p51.ruleCount);
+
+  // Verify deck sizes at extreme difficulties
+  const g10 = createInitialGameState('vs_ai', 10.0);
+  assert.equal(g10.difficulty, 10.0);
+  assert.equal(g10.mainStack.length, 40);
+  assert.equal(g10.diceStack.length, 24);
+  console.log('✓ testDifficultyNonLinearCurves passed');
+}
+
+testDifficultyNonLinearCurves();

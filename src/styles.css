@@ -607,3 +607,98 @@ button.amber {
   font-size: 1.4rem;
   margin-bottom: 6px;
 }
+
+/* Difficulty Selection Modal */
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.diff-value-badge {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: var(--cyan);
+  background: var(--surface-2);
+  border: 1px solid var(--cyan);
+  border-radius: 10px;
+  padding: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-slider-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-slider {
+  width: 100%;
+  accent-color: var(--cyan);
+  height: 8px;
+  cursor: pointer;
+}
+
+.diff-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diff-presets button.active {
+  border-color: var(--cyan);
+  background: rgba(56, 189, 248, 0.18);
+  color: #fff;
+}
+
+.phase-banner {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.83rem;
+  border: 1px solid var(--border);
+}
+
+.phase-banner.phase1 {
+  background: rgba(56, 189, 248, 0.09);
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.phase-banner.phase2 {
+  background: rgba(251, 113, 133, 0.1);
+  border-color: rgba(251, 113, 133, 0.5);
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.telemetry-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+}
+
+.telemetry-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-bottom: 2px;
+}
+
+.telemetry-val {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.ratio-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 5px;
+  background: var(--bg);
+}

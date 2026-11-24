@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/data/cards.ts","./src/engine/gameengine.ts","./src/types/game.ts"],"version":"5.7.3"}
+{"root":["./src/app.tsx","./src/main.tsx","./src/data/cards.ts","./src/engine/difficulty.ts","./src/engine/gameengine.ts","./src/types/game.ts"],"version":"5.7.3"}
