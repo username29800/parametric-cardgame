@@ -119,3 +119,41 @@ function testDifficultyNonLinearCurves() {
 }
 
 testDifficultyNonLinearCurves();
+
+import { applyDieToTimeBomb } from '../src/engine/gameEngine.ts';
+
+function testTimeBombExplosionRemovesCard() {
+  let state = createInitialGameState('local_2p', 3.5);
+  const bomb = {
+    ...RULE_TEMPLATES.find((r) => r.ruleId === 'time_bomb')!,
+    id: 'tb-1',
+    counterValue: 4,
+  };
+  state.players.p1.rules = [bomb];
+  state.phase = 'resolve_action';
+  state.drawnDice = [
+    { id: 'd-bomb', value: 5 },
+    { id: 'd-other', value: 2 },
+  ];
+
+  state = applyDieToTimeBomb(state, 'd-bomb');
+
+  assert.equal(
+    state.players.p1.rules.some((r) => r.id === 'tb-1'),
+    false,
+    'Time bomb should be removed from rules when counter reaches 0'
+  );
+  assert.equal(
+    state.mainSecondaryStack.some((c) => c.id === 'tb-1'),
+    true,
+    'Time bomb should move to mainSecondaryStack after exploding'
+  );
+  assert.equal(
+    state.players.p1.parameters['카페인'],
+    -3,
+    'All parameters should decrease by 3 on explosion'
+  );
+  console.log('✓ testTimeBombExplosionRemovesCard passed');
+}
+
+testTimeBombExplosionRemovesCard();

@@ -630,19 +630,18 @@ export function applyDieToTimeBomb(state: GameState, dieId: string): GameState {
     for (const [k, v] of Object.entries(paramOwner.parameters)) {
       blastedParams[k] = v - 3;
     }
+    const updatedPlayers = { ...next.players };
+    updatedPlayers[ruleOwnerId] = {
+      ...updatedPlayers[ruleOwnerId],
+      rules: updatedPlayers[ruleOwnerId].rules.filter((r) => r.id !== bomb.id),
+    };
+    updatedPlayers[paramOwnerId] = {
+      ...updatedPlayers[paramOwnerId],
+      parameters: blastedParams,
+    };
     next = {
       ...next,
-      players: {
-        ...next.players,
-        [ruleOwnerId]: {
-          ...next.players[ruleOwnerId],
-          rules: next.players[ruleOwnerId].rules.filter((r) => r.id !== bomb.id),
-        },
-        [paramOwnerId]: {
-          ...next.players[paramOwnerId],
-          parameters: blastedParams,
-        },
-      },
+      players: updatedPlayers,
       mainSecondaryStack: [...next.mainSecondaryStack, bomb],
     };
     next = appendLog(
